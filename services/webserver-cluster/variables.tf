@@ -46,3 +46,35 @@ locals {
   tcp_protocol = "tcp"
   all_ips      = ["0.0.0.0/0"]
 }
+
+
+variable "asg_count" {
+  description = "Number of Auto Scaling Groups to create"
+  type        = number
+  default     = 1
+}
+
+variable "enable_lb" {
+  description = "Set to true to deploy Load Balancer"
+  type        = bool
+  default     = true
+}
+
+
+variable "deploy_resources" {
+  description = "Flag to determine if resources should be deployed"
+  type        = bool
+  default     = true
+}
+
+variable "region" {
+  description = "AWS region where resources will be deployed"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "environment" {
+  description = "Deployment environment (e.g., dev, prod)"
+  type        = string
+  default     = "dev"
+}

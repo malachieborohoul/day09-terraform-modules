@@ -1,5 +1,3 @@
-
-
 # Data Sources
 data "aws_vpc" "default" {
   default = true
@@ -35,11 +33,12 @@ resource "random_pet" "tg_name" {
 
 # EC2 and Auto Scaling Resources
 resource "aws_launch_configuration" "example" {
+  count = var.deploy_resources ? var.asg_count : 0
+
   image_id        = "ami-0b0ea68c435eb488d"
   instance_type   = var.instance_type
   security_groups = [aws_security_group.instance.id]
 
-  # Render the User Data script as a template
   user_data = templatefile("${path.module}/user-data.sh", {
     server_port = var.server_port
     db_address  = data.terraform_remote_state.db.outputs.address
@@ -52,7 +51,9 @@ resource "aws_launch_configuration" "example" {
 }
 
 resource "aws_autoscaling_group" "example" {
-  launch_configuration = aws_launch_configuration.example.name
+  count = var.deploy_resources ? var.asg_count : 0
+
+  launch_configuration = aws_launch_configuration.example[0].name
   vpc_zone_identifier  = data.aws_subnets.default.ids
   target_group_arns    = [aws_lb_target_group.asg.arn]
   health_check_type    = "ELB"
@@ -68,39 +69,33 @@ resource "aws_autoscaling_group" "example" {
 
 # Security Group Resources
 resource "aws_security_group" "instance" {
-  # name = random_pet.sg_instance_name.id
-  name = "${var.cluster_name}-instance"
-
+  count = var.deploy_resources ? 1 : 0
+  name  = "${var.cluster_name}-instance"
 
   ingress {
-    from_port   = 8080
-    to_port     = 8080
+    from_port   = local.http_port
+    to_port     = local.http_port
     protocol    = local.tcp_protocol
     cidr_blocks = local.all_ips
   }
 }
 
 resource "aws_security_group" "alb" {
-  # name = random_pet.sg_alb_name.id
-  name = "${var.cluster_name}-alb"
+  count = var.deploy_resources && var.enable_lb ? 1 : 0
+  name  = "${var.cluster_name}-alb"
 
-
-
-
+  ingress {
+    from_port   = local.http_port
+    to_port     = local.http_port
+    protocol    = local.tcp_protocol
+    cidr_blocks = local.all_ips
+  }
 }
 
-resource "aws_security_group_rule" "allow_http_inbound" {
-  type              = "ingress"
-  security_group_id = aws_security_group.alb.id
-  from_port         = local.http_port
-  to_port           = local.http_port
-  protocol          = local.tcp_protocol
-  cidr_blocks       = local.all_ips
-}
+resource "aws_security_group_rule" "http" {
+  count = var.deploy_resources && var.enable_lb ? 2 : 0
 
-
-resource "aws_security_group_rule" "allow_http_outbound" {
-  type              = "egress"
+  type              = each.key == "allow_http_inbound" ? "ingress" : "egress"
   security_group_id = aws_security_group.alb.id
   from_port         = local.http_port
   to_port           = local.http_port
@@ -110,6 +105,8 @@ resource "aws_security_group_rule" "allow_http_outbound" {
 
 # Load Balancer Resources
 resource "aws_lb" "example" {
+  count = var.deploy_resources && var.enable_lb ? 1 : 0
+
   name               = var.cluster_name
   load_balancer_type = "application"
   subnets            = data.aws_subnets.default.ids
@@ -117,7 +114,9 @@ resource "aws_lb" "example" {
 }
 
 resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.example.arn
+  count = var.deploy_resources && var.enable_lb ? 1 : 0
+
+  load_balancer_arn = aws_lb.example[0].arn
   port              = local.http_port
   protocol          = "HTTP"
 
@@ -132,6 +131,8 @@ resource "aws_lb_listener" "http" {
 }
 
 resource "aws_lb_target_group" "asg" {
+  count = var.deploy_resources && var.enable_lb ? 1 : 0
+
   name     = random_pet.tg_name.id
   port     = var.server_port
   protocol = "HTTP"
@@ -149,7 +150,9 @@ resource "aws_lb_target_group" "asg" {
 }
 
 resource "aws_lb_listener_rule" "asg" {
-  listener_arn = aws_lb_listener.http.arn
+  count = var.deploy_resources && var.enable_lb ? 1 : 0
+
+  listener_arn = aws_lb_listener.http[0].arn
   priority     = 100
 
   condition {
@@ -160,16 +163,13 @@ resource "aws_lb_listener_rule" "asg" {
 
   action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.asg.arn
+    target_group_arn = aws_lb_target_group.asg[0].arn
   }
 }
 
 data "terraform_remote_state" "db" {
   backend = "s3"
   config = {
-    # bucket = "terraform-bsm-my-state"
-    # key    = "stage/data-stores/mysql/terraform.tfstate"
-
     bucket = var.db_remote_state_bucket
     key    = var.db_remote_state_key
     region = "us-east-2"
@@ -177,6 +177,6 @@ data "terraform_remote_state" "db" {
 }
 
 output "asg_name" {
-  value       = aws_autoscaling_group.example.name
+  value       = aws_autoscaling_group.example[0].name
   description = "The name of the Auto Scaling Group"
 }
